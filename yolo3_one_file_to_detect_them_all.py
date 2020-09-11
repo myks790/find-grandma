@@ -407,9 +407,6 @@ def _main_(args):
     weight_reader = WeightReader(weights_path)
     weight_reader.load_weights(yolov3)
 
-    image_path = input()
-
-    print('image_path :', image_path)
     # preprocess the image
     image = cv2.imread(image_path)
     image_h, image_w, _ = image.shape
