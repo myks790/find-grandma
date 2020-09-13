@@ -1,6 +1,9 @@
 import argparse
 import os
 import sys
+import threading
+from threading import Thread
+
 import numpy as np
 os.environ["KERAS_BACKEND"] = "plaidml.keras.backend"
 from keras.layers import Conv2D, Input, BatchNormalization, LeakyReLU, ZeroPadding2D, UpSampling2D
@@ -8,6 +11,7 @@ from keras.layers.merge import add, concatenate
 from keras.models import Model
 import struct
 import cv2
+from multiprocessing import Process
 
 np.set_printoptions(threshold=sys.maxsize)
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
@@ -39,12 +43,12 @@ class WeightReader:
                 w_f.read(4)
 
             transpose = (major > 1000) or (minor > 1000)
-            
+
             binary = w_f.read()
 
         self.offset = 0
         self.all_weights = np.frombuffer(binary, dtype='float32')
-        
+
     def read_bytes(self, size):
         self.offset = self.offset + size
         return self.all_weights[self.offset-size:self.offset]
@@ -63,14 +67,14 @@ class WeightReader:
                     beta  = self.read_bytes(size) # bias
                     gamma = self.read_bytes(size) # scale
                     mean  = self.read_bytes(size) # mean
-                    var   = self.read_bytes(size) # variance            
+                    var   = self.read_bytes(size) # variance
 
-                    weights = norm_layer.set_weights([gamma, beta, mean, var])  
+                    weights = norm_layer.set_weights([gamma, beta, mean, var])
 
                 if len(conv_layer.get_weights()) > 1:
                     bias   = self.read_bytes(np.prod(conv_layer.get_weights()[1].shape))
                     kernel = self.read_bytes(np.prod(conv_layer.get_weights()[0].shape))
-                    
+
                     kernel = kernel.reshape(list(reversed(conv_layer.get_weights()[0].shape)))
                     kernel = kernel.transpose([2,3,1,0])
                     conv_layer.set_weights([kernel, bias])
@@ -80,8 +84,8 @@ class WeightReader:
                     kernel = kernel.transpose([2,3,1,0])
                     conv_layer.set_weights([kernel])
             except ValueError:
-                print("no convolution #" + str(i))     
-    
+                print("no convolution #" + str(i))
+
     def reset(self):
         self.offset = 0
 
@@ -91,7 +95,7 @@ class BoundBox:
         self.ymin = ymin
         self.xmax = xmax
         self.ymax = ymax
-        
+
         self.objness = objness
         self.classes = classes
 
@@ -101,30 +105,30 @@ class BoundBox:
     def get_label(self):
         if self.label == -1:
             self.label = np.argmax(self.classes)
-        
+
         return self.label
-    
+
     def get_score(self):
         if self.score == -1:
             self.score = self.classes[self.get_label()]
-            
+
         return self.score
 
 def _conv_block(inp, convs, skip=True):
     x = inp
     count = 0
-    
+
     for conv in convs:
         if count == (len(convs) - 2) and skip:
             skip_connection = x
         count += 1
-        
+
         if conv['stride'] > 1: x = ZeroPadding2D(((1,0),(1,0)))(x) # peculiar padding as darknet prefer left and top
-        x = Conv2D(conv['filter'], 
-                   conv['kernel'], 
-                   strides=conv['stride'], 
+        x = Conv2D(conv['filter'],
+                   conv['kernel'],
+                   strides=conv['stride'],
                    padding='valid' if conv['stride'] > 1 else 'same', # peculiar padding as darknet prefer left and top
-                   name='conv_' + str(conv['layer_idx']), 
+                   name='conv_' + str(conv['layer_idx']),
                    use_bias=False if conv['bnorm'] else True)(x)
         if conv['bnorm']: x = BatchNormalization(epsilon=0.001, name='bnorm_' + str(conv['layer_idx']))(x)
         if conv['leaky']: x = LeakyReLU(alpha=0.1, name='leaky_' + str(conv['layer_idx']))(x)
@@ -144,7 +148,7 @@ def _interval_overlap(interval_a, interval_b):
         if x2 < x3:
              return 0
         else:
-            return min(x2,x4) - x3          
+            return min(x2,x4) - x3
 
 def _sigmoid(x):
     return 1. / (1. + np.exp(-x))
@@ -152,14 +156,14 @@ def _sigmoid(x):
 def bbox_iou(box1, box2):
     intersect_w = _interval_overlap([box1.xmin, box1.xmax], [box2.xmin, box2.xmax])
     intersect_h = _interval_overlap([box1.ymin, box1.ymax], [box2.ymin, box2.ymax])
-    
+
     intersect = intersect_w * intersect_h
 
     w1, h1 = box1.xmax-box1.xmin, box1.ymax-box1.ymin
     w2, h2 = box2.xmax-box2.xmin, box2.ymax-box2.ymin
-    
+
     union = w1*h1 + w2*h2 - intersect
-    
+
     return float(intersect) / union
 
 def make_yolov3_model():
@@ -189,9 +193,9 @@ def make_yolov3_model():
     for i in range(7):
         x = _conv_block(x, [{'filter': 128, 'kernel': 1, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 16+i*3},
                             {'filter': 256, 'kernel': 3, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 17+i*3}])
-        
+
     skip_36 = x
-        
+
     # Layer 37 => 40
     x = _conv_block(x, [{'filter': 512, 'kernel': 3, 'stride': 2, 'bnorm': True, 'leaky': True, 'layer_idx': 37},
                         {'filter': 256, 'kernel': 1, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 38},
@@ -201,9 +205,9 @@ def make_yolov3_model():
     for i in range(7):
         x = _conv_block(x, [{'filter': 256, 'kernel': 1, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 41+i*3},
                             {'filter': 512, 'kernel': 3, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 42+i*3}])
-        
+
     skip_61 = x
-        
+
     # Layer 62 => 65
     x = _conv_block(x, [{'filter': 1024, 'kernel': 3, 'stride': 2, 'bnorm': True, 'leaky': True, 'layer_idx': 62},
                         {'filter':  512, 'kernel': 1, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 63},
@@ -213,7 +217,7 @@ def make_yolov3_model():
     for i in range(3):
         x = _conv_block(x, [{'filter':  512, 'kernel': 1, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 66+i*3},
                             {'filter': 1024, 'kernel': 3, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 67+i*3}])
-        
+
     # Layer 75 => 79
     x = _conv_block(x, [{'filter':  512, 'kernel': 1, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 75},
                         {'filter': 1024, 'kernel': 3, 'stride': 1, 'bnorm': True, 'leaky': True, 'layer_idx': 76},
@@ -255,7 +259,7 @@ def make_yolov3_model():
                                {'filter': 256, 'kernel': 3, 'stride': 1, 'bnorm': True,  'leaky': True,  'layer_idx': 104},
                                {'filter': 255, 'kernel': 1, 'stride': 1, 'bnorm': False, 'leaky': False, 'layer_idx': 105}], skip=False)
 
-    model = Model(input_image, [yolo_82, yolo_94, yolo_106])    
+    model = Model(input_image, [yolo_82, yolo_94, yolo_106])
     return model
 
 def preprocess_input(image, net_h, net_w):
@@ -295,25 +299,25 @@ def decode_netout(netout, anchors, obj_thresh, nms_thresh, net_h, net_w):
     for i in range(grid_h*grid_w):
         row = i / grid_w
         col = i % grid_w
-        
+
         for b in range(nb_box):
             # 4th element is objectness score
             objectness = netout[int(row)][int(col)][b][4]
             #objectness = netout[..., :4]
-            
+
             if(objectness.all() <= obj_thresh): continue
-            
+
             # first 4 elements are x, y, w, and h
             x, y, w, h = netout[int(row)][int(col)][b][:4]
 
             x = (col + x) / grid_w # center position, unit: image width
             y = (row + y) / grid_h # center position, unit: image height
             w = anchors[2 * b + 0] * np.exp(w) / net_w # unit: image width
-            h = anchors[2 * b + 1] * np.exp(h) / net_h # unit: image height  
-            
+            h = anchors[2 * b + 1] * np.exp(h) / net_h # unit: image height
+
             # last elements are class probabilities
             classes = netout[int(row)][col][b][5:]
-            
+
             box = BoundBox(x-w/2, y-h/2, x+w/2, y+h/2, objectness, classes)
             #box = BoundBox(x-w/2, y-h/2, x+w/2, y+h/2, None, classes)
 
@@ -328,22 +332,22 @@ def correct_yolo_boxes(boxes, image_h, image_w, net_h, net_w):
     else:
         new_h = net_w
         new_w = (image_w*net_h)/image_h
-        
+
     for i in range(len(boxes)):
         x_offset, x_scale = (net_w - new_w)/2./net_w, float(new_w)/net_w
         y_offset, y_scale = (net_h - new_h)/2./net_h, float(new_h)/net_h
-        
+
         boxes[i].xmin = int((boxes[i].xmin - x_offset) / x_scale * image_w)
         boxes[i].xmax = int((boxes[i].xmax - x_offset) / x_scale * image_w)
         boxes[i].ymin = int((boxes[i].ymin - y_offset) / y_scale * image_h)
         boxes[i].ymax = int((boxes[i].ymax - y_offset) / y_scale * image_h)
-        
+
 def do_nms(boxes, nms_thresh):
     if len(boxes) > 0:
         nb_class = len(boxes[0].classes)
     else:
         return
-        
+
     for c in range(nb_class):
         sorted_indices = np.argsort([-box.classes[c] for box in boxes])
 
@@ -357,38 +361,92 @@ def do_nms(boxes, nms_thresh):
 
                 if bbox_iou(boxes[index_i], boxes[index_j]) >= nms_thresh:
                     boxes[index_j].classes[c] = 0
-                    
+
 def draw_boxes(image, boxes, labels, obj_thresh):
+    result = []
     for box in boxes:
         label_str = ''
         label = -1
-        
+
         for i in range(len(labels)):
             if box.classes[i] > obj_thresh:
                 label_str += labels[i]
                 label = i
-                print(labels[i] + ': ' + str(box.classes[i]*100) + '%')
-                print('  location : ' + str(box.xmin)+', '+ str(box.ymin)+', '+ str(box.xmax)+', '+ str(box.ymax)+', ')
-                
+                result.append({'label':labels[i], 'accuracy':box.classes[i]*100, 'xmin':box.xmin, 'ymin':box.ymin,'xmax':box.xmax,'ymax':box.ymax})
         if label >= 0:
             cv2.rectangle(image, (box.xmin,box.ymin), (box.xmax,box.ymax), (0,255,0), 3)
-            cv2.putText(image, 
-                        label_str + ' ' + str(box.get_score()), 
-                        (box.xmin, box.ymin - 13), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 
-                        1e-3 * image.shape[0], 
+            cv2.putText(image,
+                        label_str + ' ' + str(box.get_score()),
+                        (box.xmin, box.ymin - 13),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1e-3 * image.shape[0],
                         (0,255,0), 2)
-        
-    return image      
+    return result
+    # return image
 
-def _main_(args):
-    weights_path = args.weights
-    image_path   = args.image
+
+def execute(path, file_name, yolov3, labels, anchors):
+    save_path = 'D:/result/'
+
+    save_file_path = save_path + file_name[:-4] + '_detected' + file_name[-4:]
+    if os.path.isfile(save_file_path):
+        return
+
+    image_path = path + file_name
 
     # set some parameters
     net_h, net_w = 416, 416
     obj_thresh, nms_thresh = 0.5, 0.45
-    anchors = [[116,90,  156,198,  373,326],  [30,61, 62,45,  59,119], [10,13,  16,30,  33,23]]
+    # preprocess the image
+    image = cv2.imread(image_path)
+    image_h, image_w, _ = image.shape
+    new_image = preprocess_input(image, net_h, net_w)
+
+    global lock
+    lock.acquire()
+    try:
+        # run the prediction
+        yolos = yolov3.predict(new_image)
+    finally:
+        lock.release()
+
+    boxes = []
+
+    for i in range(len(yolos)):
+        # decode the output of the network
+        boxes += decode_netout(yolos[i][0], anchors[i], obj_thresh, nms_thresh, net_h, net_w)
+
+    # correct the sizes of the bounding boxes
+    correct_yolo_boxes(boxes, image_h, image_w, net_h, net_w)
+
+    # suppress non-maximal boxes
+    do_nms(boxes, nms_thresh)
+
+    # draw bounding boxes on the image using labels
+    result = draw_boxes(image, boxes, labels, obj_thresh)
+    print('image_path :', image_path, '  ', result)
+    remove_flag = True
+    for e in result:
+        if e['label'] == 'person':
+            # write the image with bounding boxes to file
+            remove_flag = False
+            cv2.imwrite(save_file_path, (image).astype('uint8'))
+    if remove_flag:
+        os.remove(image_path)
+        print('remove : image_path : ', image_path)
+
+
+lock = threading.Lock()
+
+
+def _main_(args):
+    path = 'D:/snapshots/'
+    file_list = os.listdir(path)
+
+    weights_path = args.weights
+
+    # set some parameters
+    anchors = [[116, 90, 156, 198, 373, 326], [30, 61, 62, 45, 59, 119], [10, 13, 16, 30, 33, 23]]
     labels = ["person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck", \
               "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", \
               "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", \
@@ -407,31 +465,22 @@ def _main_(args):
     weight_reader = WeightReader(weights_path)
     weight_reader.load_weights(yolov3)
 
-    # preprocess the image
-    image = cv2.imread(image_path)
-    image_h, image_w, _ = image.shape
-    new_image = preprocess_input(image, net_h, net_w)
+    cnt = 0
+    ps = []
+    for file_name in file_list:
+        cnt += 1
+        ps.append(Thread(target=execute, args=(path, file_name, yolov3, labels, anchors)))
+        if cnt == 3:
+            for p in ps:
+                p.start()
+            for p in ps:
+                p.join()
+            ps = []
+            cnt = 0
+        if len(file_list) == 1:
+            print('if rast file')
+            file_list = os.listdir(path)
 
-    # run the prediction
-    yolos = yolov3.predict(new_image)
-    boxes =[]
-
-    for i in range(len(yolos)):
-    # decode the output of the network
-        boxes += decode_netout(yolos[i][0], anchors[i], obj_thresh, nms_thresh, net_h, net_w)
-
-    # correct the sizes of the bounding boxes
-    correct_yolo_boxes(boxes, image_h, image_w, net_h, net_w)
-
-    # suppress non-maximal boxes
-    do_nms(boxes, nms_thresh)
-
-    # draw bounding boxes on the image using labels
-    draw_boxes(image, boxes, labels, obj_thresh)
-
-    # write the image with bounding boxes to file
-    cv2.imwrite(image_path[:-5] + '_detected' + image_path[-5:], (image).astype('uint8'))
-    print('=====end======')
 
 if __name__ == '__main__':
     args = argparser.parse_args()

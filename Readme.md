@@ -1,5 +1,5 @@
 ## run
-python yolo3_one_file_to_detect_them_all.py -w yolov3.weights -i grandma5.jpeg
+python yolo3_one_file_to_detect_them_all.py -w yolov3.weights
 
 ## plaidml
 https://github.com/plaidml/plaidml
