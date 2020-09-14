@@ -3,7 +3,7 @@ import os
 import sys
 import threading
 from threading import Thread
-
+from multiprocessing import Process
 import numpy as np
 os.environ["KERAS_BACKEND"] = "plaidml.keras.backend"
 from keras.layers import Conv2D, Input, BatchNormalization, LeakyReLU, ZeroPadding2D, UpSampling2D
@@ -11,11 +11,10 @@ from keras.layers.merge import add, concatenate
 from keras.models import Model
 import struct
 import cv2
-from multiprocessing import Process
 
 np.set_printoptions(threshold=sys.maxsize)
-os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
+# os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+# os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
 argparser = argparse.ArgumentParser(
     description='test yolov3 network with coco weights')
@@ -29,6 +28,7 @@ argparser.add_argument(
     '-i',
     '--image',
     help='path to image file')
+
 
 class WeightReader:
     def __init__(self, weight_file):
@@ -57,7 +57,7 @@ class WeightReader:
         for i in range(106):
             try:
                 conv_layer = model.get_layer('conv_' + str(i))
-                print("loading weights of convolution #" + str(i))
+                # print("loading weights of convolution #" + str(i))
 
                 if i not in [81, 93, 105]:
                     norm_layer = model.get_layer('bnorm_' + str(i))
@@ -84,10 +84,11 @@ class WeightReader:
                     kernel = kernel.transpose([2,3,1,0])
                     conv_layer.set_weights([kernel])
             except ValueError:
-                print("no convolution #" + str(i))
-
+                # print("no convolution #" + str(i))
+                ''
     def reset(self):
         self.offset = 0
+
 
 class BoundBox:
     def __init__(self, xmin, ymin, xmax, ymax, objness = None, classes = None):
@@ -114,6 +115,7 @@ class BoundBox:
 
         return self.score
 
+
 def _conv_block(inp, convs, skip=True):
     x = inp
     count = 0
@@ -135,6 +137,7 @@ def _conv_block(inp, convs, skip=True):
 
     return add([skip_connection, x]) if skip else x
 
+
 def _interval_overlap(interval_a, interval_b):
     x1, x2 = interval_a
     x3, x4 = interval_b
@@ -150,8 +153,10 @@ def _interval_overlap(interval_a, interval_b):
         else:
             return min(x2,x4) - x3
 
+
 def _sigmoid(x):
     return 1. / (1. + np.exp(-x))
+
 
 def bbox_iou(box1, box2):
     intersect_w = _interval_overlap([box1.xmin, box1.xmax], [box2.xmin, box2.xmax])
@@ -165,6 +170,7 @@ def bbox_iou(box1, box2):
     union = w1*h1 + w2*h2 - intersect
 
     return float(intersect) / union
+
 
 def make_yolov3_model():
     input_image = Input(shape=(None, None, 3))
@@ -262,6 +268,7 @@ def make_yolov3_model():
     model = Model(input_image, [yolo_82, yolo_94, yolo_106])
     return model
 
+
 def preprocess_input(image, net_h, net_w):
     new_h, new_w, _ = image.shape
 
@@ -282,6 +289,7 @@ def preprocess_input(image, net_h, net_w):
     new_image = np.expand_dims(new_image, 0)
 
     return new_image
+
 
 def decode_netout(netout, anchors, obj_thresh, nms_thresh, net_h, net_w):
     grid_h, grid_w = netout.shape[:2]
@@ -325,6 +333,7 @@ def decode_netout(netout, anchors, obj_thresh, nms_thresh, net_h, net_w):
 
     return boxes
 
+
 def correct_yolo_boxes(boxes, image_h, image_w, net_h, net_w):
     if (float(net_w)/image_w) < (float(net_h)/image_h):
         new_w = net_w
@@ -341,6 +350,7 @@ def correct_yolo_boxes(boxes, image_h, image_w, net_h, net_w):
         boxes[i].xmax = int((boxes[i].xmax - x_offset) / x_scale * image_w)
         boxes[i].ymin = int((boxes[i].ymin - y_offset) / y_scale * image_h)
         boxes[i].ymax = int((boxes[i].ymax - y_offset) / y_scale * image_h)
+
 
 def do_nms(boxes, nms_thresh):
     if len(boxes) > 0:
@@ -361,6 +371,7 @@ def do_nms(boxes, nms_thresh):
 
                 if bbox_iou(boxes[index_i], boxes[index_j]) >= nms_thresh:
                     boxes[index_j].classes[c] = 0
+
 
 def draw_boxes(image, boxes, labels, obj_thresh):
     result = []
@@ -385,77 +396,81 @@ def draw_boxes(image, boxes, labels, obj_thresh):
     # return image
 
 
-def execute(path, file_name, yolov3, labels, anchors):
-    save_path = 'D:/result/'
+class PredictWriter(Thread):
+    def __init__(self, path, file_name, yolov3, labels, anchors, lock):
+        Thread.__init__(self)
+        self.path = path
+        self.file_name = file_name
+        self.yolov3 = yolov3
+        self.labels = labels
+        self.anchors = anchors
+        self.lock = lock
 
-    save_file_path = save_path + file_name[:-4] + '_detected' + file_name[-4:]
-    if os.path.isfile(save_file_path):
-        return
+    def run(self):
+        self.predict_save(self.path, self.file_name, self.yolov3, self.labels, self.anchors)
 
-    image_path = path + file_name
+    def predict_save(self, path, file_name, yolov3, labels, anchors):
+        save_path = 'D:/result/'
 
-    # set some parameters
-    net_h, net_w = 416, 416
-    obj_thresh, nms_thresh = 0.5, 0.45
-    # preprocess the image
-    image = cv2.imread(image_path)
-    image_h, image_w, _ = image.shape
-    new_image = preprocess_input(image, net_h, net_w)
+        save_file_path = save_path + file_name[:-4] + '_detected' + file_name[-4:]
+        if os.path.isfile(save_file_path):
+            return
 
-    global lock
-    lock.acquire()
-    try:
-        # run the prediction
-        yolos = yolov3.predict(new_image)
-    finally:
-        lock.release()
+        image_path = path + file_name
 
-    boxes = []
+        # set some parameters
+        net_h, net_w = 416, 416
+        obj_thresh, nms_thresh = 0.5, 0.45
+        # preprocess the image
+        image = cv2.imread(image_path)
+        image_h, image_w, _ = image.shape
+        new_image = preprocess_input(image, net_h, net_w)
 
-    for i in range(len(yolos)):
-        # decode the output of the network
-        boxes += decode_netout(yolos[i][0], anchors[i], obj_thresh, nms_thresh, net_h, net_w)
+        self.lock.acquire()
+        try:
+            # run the prediction
+            yolos = yolov3.predict(new_image)
+        finally:
+            self.lock.release()
 
-    # correct the sizes of the bounding boxes
-    correct_yolo_boxes(boxes, image_h, image_w, net_h, net_w)
+        boxes = []
 
-    # suppress non-maximal boxes
-    do_nms(boxes, nms_thresh)
+        for i in range(len(yolos)):
+            # decode the output of the network
+            boxes += decode_netout(yolos[i][0], anchors[i], obj_thresh, nms_thresh, net_h, net_w)
 
-    # draw bounding boxes on the image using labels
-    result = draw_boxes(image, boxes, labels, obj_thresh)
-    print('image_path :', image_path, '  ', result)
-    remove_flag = True
-    for e in result:
-        if e['label'] == 'person':
-            # write the image with bounding boxes to file
-            remove_flag = False
-            cv2.imwrite(save_file_path, (image).astype('uint8'))
-    if remove_flag:
-        os.remove(image_path)
-        print('remove : image_path : ', image_path)
+        # correct the sizes of the bounding boxes
+        correct_yolo_boxes(boxes, image_h, image_w, net_h, net_w)
+
+        # suppress non-maximal boxes
+        do_nms(boxes, nms_thresh)
+
+        # draw bounding boxes on the image using labels
+        result = draw_boxes(image, boxes, labels, obj_thresh)
+        # print('image_path :', image_path, '  ', result)
+        remove_flag = True
+        for e in result:
+            if e['label'] == 'person':
+                # write the image with bounding boxes to file
+                remove_flag = False
+                cv2.imwrite(save_file_path, (image).astype('uint8'))
+        if remove_flag:
+            os.remove(image_path)
+            # print('remove : image_path : ', image_path)
 
 
-lock = threading.Lock()
-
-
-def _main_(args):
-    path = 'D:/snapshots/'
-    file_list = os.listdir(path)
-
-    weights_path = args.weights
-
+def process(path, file_list, weights_path):
     # set some parameters
     anchors = [[116, 90, 156, 198, 373, 326], [30, 61, 62, 45, 59, 119], [10, 13, 16, 30, 33, 23]]
-    labels = ["person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck", \
-              "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", \
-              "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", \
-              "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", \
-              "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", \
-              "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", \
-              "apple", "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", \
-              "chair", "sofa", "pottedplant", "bed", "diningtable", "toilet", "tvmonitor", "laptop", "mouse", \
-              "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", \
+    labels = ["person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck",
+              "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench",
+              "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe",
+              "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard",
+              "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard",
+              "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana",
+              "apple", "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake",
+              "chair", "sofa", "pottedplant", "bed", "diningtable", "toilet", "tvmonitor", "laptop", "mouse",
+              "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator",
               "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush"]
 
     # make the yolov3 model to predict 80 classes on COCO
@@ -466,20 +481,39 @@ def _main_(args):
     weight_reader.load_weights(yolov3)
 
     cnt = 0
-    ps = []
+    ts = []
+    lock = threading.Lock()
     for file_name in file_list:
         cnt += 1
-        ps.append(Thread(target=execute, args=(path, file_name, yolov3, labels, anchors)))
+        ts.append(PredictWriter(path, file_name, yolov3, labels, anchors, lock))
         if cnt == 3:
-            for p in ps:
-                p.start()
-            for p in ps:
-                p.join()
-            ps = []
+            for t in ts:
+                t.start()
+            for t in ts:
+                t.join()
+            ts = []
             cnt = 0
-        if len(file_list) == 1:
-            print('if rast file')
-            file_list = os.listdir(path)
+
+
+def _main_(args):
+    weights_path = args.weights
+    path = 'D:/snapshots/'
+    file_list = os.listdir(path)
+
+    i = 0
+    part_of_file_list = [[] for _ in range(6)]
+    for file_name in file_list:
+        part_of_file_list[i % len(part_of_file_list)].append(file_name)
+        i += 1
+
+    ps = []
+    for file_list in part_of_file_list:
+        ps.append(Process(target=process, args=(path, file_list, weights_path,)))
+    for p in ps:
+        p.start()
+    for p in ps:
+        p.join()
+    print('end=============')
 
 
 if __name__ == '__main__':
