@@ -411,7 +411,7 @@ def predict_save(path, file_name, yolov3, labels, anchors):
 
     # set some parameters
     net_h, net_w = 416, 416
-    obj_thresh, nms_thresh = 0.5, 0.45
+    obj_thresh, nms_thresh = 0.505, 0.45
     # preprocess the image
     image = cv2.imread(image_file_path)
     image_h, image_w, _ = image.shape
@@ -442,6 +442,7 @@ def predict_save(path, file_name, yolov3, labels, anchors):
             remove_flag = False
             cv2.imwrite(save_file_path, (image).astype('uint8'))
             os.rename(image_file_path, move_file_path)
+            break
     if remove_flag:
         os.remove(image_file_path)
         # print('remove : image_path : ', image_path)
