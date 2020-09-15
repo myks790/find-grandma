@@ -3,7 +3,8 @@ import os
 import sys
 import threading
 from threading import Thread
-from multiprocessing import Process
+from multiprocessing import Process, Queue
+import time
 import numpy as np
 os.environ["KERAS_BACKEND"] = "plaidml.keras.backend"
 from keras.layers import Conv2D, Input, BatchNormalization, LeakyReLU, ZeroPadding2D, UpSampling2D
@@ -396,70 +397,57 @@ def draw_boxes(image, boxes, labels, obj_thresh):
     # return image
 
 
-class PredictWriter(Thread):
-    def __init__(self, path, file_name, yolov3, labels, anchors, lock):
-        Thread.__init__(self)
-        self.path = path
-        self.file_name = file_name
-        self.yolov3 = yolov3
-        self.labels = labels
-        self.anchors = anchors
-        self.lock = lock
+def predict_save(path, file_name, yolov3, labels, anchors):
+    save_path = 'D:/result/'
+    move_path = 'D:/pre/'
+    image_file_path = path + file_name
+    move_file_path = move_path + file_name
+    save_file_path = save_path + file_name[:-4] + '_detected' + file_name[-4:]
 
-    def run(self):
-        self.predict_save(self.path, self.file_name, self.yolov3, self.labels, self.anchors)
+    if os.path.isfile(save_file_path):
+        if os.path.isfile(image_file_path):
+            os.rename(image_file_path, move_file_path)
+        return
 
-    def predict_save(self, path, file_name, yolov3, labels, anchors):
-        save_path = 'D:/result/'
+    # set some parameters
+    net_h, net_w = 416, 416
+    obj_thresh, nms_thresh = 0.5, 0.45
+    # preprocess the image
+    image = cv2.imread(image_file_path)
+    image_h, image_w, _ = image.shape
+    new_image = preprocess_input(image, net_h, net_w)
 
-        save_file_path = save_path + file_name[:-4] + '_detected' + file_name[-4:]
-        if os.path.isfile(save_file_path):
-            return
+    # run the prediction
+    yolos = yolov3.predict(new_image)
 
-        image_path = path + file_name
+    boxes = []
 
-        # set some parameters
-        net_h, net_w = 416, 416
-        obj_thresh, nms_thresh = 0.5, 0.45
-        # preprocess the image
-        image = cv2.imread(image_path)
-        image_h, image_w, _ = image.shape
-        new_image = preprocess_input(image, net_h, net_w)
+    for i in range(len(yolos)):
+        # decode the output of the network
+        boxes += decode_netout(yolos[i][0], anchors[i], obj_thresh, nms_thresh, net_h, net_w)
 
-        self.lock.acquire()
-        try:
-            # run the prediction
-            yolos = yolov3.predict(new_image)
-        finally:
-            self.lock.release()
+    # correct the sizes of the bounding boxes
+    correct_yolo_boxes(boxes, image_h, image_w, net_h, net_w)
 
-        boxes = []
+    # suppress non-maximal boxes
+    do_nms(boxes, nms_thresh)
 
-        for i in range(len(yolos)):
-            # decode the output of the network
-            boxes += decode_netout(yolos[i][0], anchors[i], obj_thresh, nms_thresh, net_h, net_w)
-
-        # correct the sizes of the bounding boxes
-        correct_yolo_boxes(boxes, image_h, image_w, net_h, net_w)
-
-        # suppress non-maximal boxes
-        do_nms(boxes, nms_thresh)
-
-        # draw bounding boxes on the image using labels
-        result = draw_boxes(image, boxes, labels, obj_thresh)
-        # print('image_path :', image_path, '  ', result)
-        remove_flag = True
-        for e in result:
-            if e['label'] == 'person':
-                # write the image with bounding boxes to file
-                remove_flag = False
-                cv2.imwrite(save_file_path, (image).astype('uint8'))
-        if remove_flag:
-            os.remove(image_path)
-            # print('remove : image_path : ', image_path)
+    # draw bounding boxes on the image using labels
+    result = draw_boxes(image, boxes, labels, obj_thresh)
+    # print('image_path :', image_path, '  ', result)
+    remove_flag = True
+    for e in result:
+        if e['label'] == 'person':
+            # write the image with bounding boxes to file
+            remove_flag = False
+            cv2.imwrite(save_file_path, (image).astype('uint8'))
+            os.rename(image_file_path, move_file_path)
+    if remove_flag:
+        os.remove(image_file_path)
+        # print('remove : image_path : ', image_path)
 
 
-def process(path, file_list, weights_path):
+def process(path, file_queue, weights_path):
     # set some parameters
     anchors = [[116, 90, 156, 198, 373, 326], [30, 61, 62, 45, 59, 119], [10, 13, 16, 30, 33, 23]]
     labels = ["person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck",
@@ -480,35 +468,33 @@ def process(path, file_list, weights_path):
     weight_reader = WeightReader(weights_path)
     weight_reader.load_weights(yolov3)
 
-    cnt = 0
-    ts = []
-    lock = threading.Lock()
-    for file_name in file_list:
-        cnt += 1
-        ts.append(PredictWriter(path, file_name, yolov3, labels, anchors, lock))
-        if cnt == 3:
-            for t in ts:
-                t.start()
-            for t in ts:
-                t.join()
-            ts = []
-            cnt = 0
+    while True:
+        predict_save(path, file_queue.get(), yolov3, labels, anchors)
+
+
+def file_load(path, file_queue):
+    file_list = os.listdir(path)
+    last_file_name = ''
+    while True:
+        for file_name in file_list:
+            if file_name > last_file_name:
+                file_queue.put(file_name)
+                last_file_name = file_name
+        file_list = os.listdir(path)
+        time.sleep(2)
 
 
 def _main_(args):
     weights_path = args.weights
     path = 'D:/snapshots/'
-    file_list = os.listdir(path)
 
-    i = 0
-    part_of_file_list = [[] for _ in range(6)]
-    for file_name in file_list:
-        part_of_file_list[i % len(part_of_file_list)].append(file_name)
-        i += 1
+    file_queue = Queue(50)
+    t = Thread(target=file_load, args=(path, file_queue,))
+    t.start()
 
     ps = []
-    for file_list in part_of_file_list:
-        ps.append(Process(target=process, args=(path, file_list, weights_path,)))
+    for _ in range(7):
+        ps.append(Process(target=process, args=(path, file_queue, weights_path,)))
     for p in ps:
         p.start()
     for p in ps:
