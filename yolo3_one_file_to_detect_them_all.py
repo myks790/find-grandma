@@ -1,11 +1,11 @@
 import argparse
 import os
 import sys
-import threading
 from threading import Thread
 from multiprocessing import Process, Queue
 import time
 import numpy as np
+from filecmp import cmp
 os.environ["KERAS_BACKEND"] = "plaidml.keras.backend"
 from keras.layers import Conv2D, Input, BatchNormalization, LeakyReLU, ZeroPadding2D, UpSampling2D
 from keras.layers.merge import add, concatenate
@@ -398,8 +398,8 @@ def draw_boxes(image, boxes, labels, obj_thresh):
 
 
 def predict_save(path, file_name, yolov3, labels, anchors):
-    save_path = 'D:/result/'
-    move_path = 'D:/pre/'
+    save_path = base_path+'/result/'
+    move_path = base_path+'/pre/'
     image_file_path = path + file_name
     move_file_path = move_path + file_name
     save_file_path = save_path + file_name[:-4] + '_detected' + file_name[-4:]
@@ -470,24 +470,48 @@ def process(path, file_queue, weights_path):
     weight_reader.load_weights(yolov3)
 
     while True:
-        predict_save(path, file_queue.get(), yolov3, labels, anchors)
+        try:
+            predict_save(path, file_queue.get(), yolov3, labels, anchors)
+        except PermissionError:
+            print(PermissionError)
+            time.sleep(10)
+            predict_save(path, file_queue.get(), yolov3, labels, anchors)
+
+
+def mse(img_a, img_b):
+    err = np.sum((img_a.astype('float') - img_b.astype('float')) ** 2)
+    err /= float(img_a.shape[0] * img_a.shape[1])
+    return err
 
 
 def file_load(path, file_queue):
     file_list = os.listdir(path)
-    last_file_name = ''
+    last_file_name = file_list[0]
+
     while True:
+        target_files = []
         for file_name in file_list:
             if file_name > last_file_name:
-                file_queue.put(file_name)
-                last_file_name = file_name
+                crop_rast_img = cv2.imread(path+last_file_name)
+                crop_img = cv2.imread(path+file_name)
+                if mse(crop_rast_img, crop_img) < 100:
+                    os.remove(path+file_name)
+                    print('remove ', file_name)
+                else:
+                    target_files.append(file_name)
+                    last_file_name = file_name
+        for file_name in target_files:
+            file_queue.put(file_name)
         file_list = os.listdir(path)
         time.sleep(2)
 
 
+base_path = 'Z:/ch-gm'
+
+
 def _main_(args):
     weights_path = args.weights
-    path = 'D:/snapshots/'
+    path = base_path+'/snapshots/'
 
     file_queue = Queue(50)
     t = Thread(target=file_load, args=(path, file_queue,))
