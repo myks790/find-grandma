@@ -1,16 +1,36 @@
-# This is a sample Python script.
+import argparse
+from guard import watch
 
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
+argparser = argparse.ArgumentParser(
+    description='test yolov3 network with coco weights')
+
+argparser.add_argument(
+    '-w',
+    '--weights',
+    help='path to weights file',
+    default='yolov3.weights')
+
+argparser.add_argument(
+    '-i',
+    '--image',
+    help='path to image file')
+
+argparser.add_argument(
+    '-p',
+    '--path',
+    help='path to base path',
+    default='Z:/ch-gm')
 
 
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
+def _main_(args):
+    base_path = args.path
+    weights_path = args.weights
+
+    watch(base_path, weights_path)
+
+    print('end=============')
 
 
-# Press the green button in the gutter to run the script.
 if __name__ == '__main__':
-    print_hi('PyCharm')
-
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+    args = argparser.parse_args()
+    _main_(args)

@@ -1,6 +1,7 @@
+## install
+pip install -r requirements.txt
 ## run
-python yolo3_one_file_to_detect_them_all.py -w yolov3.weights
-
+python main.py
 ## plaidml
 https://github.com/plaidml/plaidml
 ## keras-yolo3
