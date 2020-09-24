@@ -18,4 +18,6 @@ def upload_blob(source_file):
     blob = bucket.blob(full_path)
     blob.upload_from_filename(source_file)
     blob.make_public()
-    return print('https://storage.googleapis.com/{}/{}'.format(config.storage_bucket, full_path))
+    url = 'https://storage.googleapis.com/{}/{}'.format(config.storage_bucket, full_path)
+    print(url)
+    return url
