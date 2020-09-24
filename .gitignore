@@ -142,4 +142,5 @@ cython_debug/
 .idea
 
 yolov3.weights
-ein-server-firebase-adminsdk-key.json
+firebase-adminsdk-key.json
+config.py

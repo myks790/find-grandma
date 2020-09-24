@@ -23,6 +23,7 @@ labels = ["person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", 
           "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator",
           "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush"]
 
+
 class WeightReader:
     def __init__(self, weight_file):
         with open(weight_file, 'rb') as w_f:
@@ -385,7 +386,7 @@ def do_nms(boxes, nms_thresh):
 
 
 def draw_boxes(image, boxes, labels, obj_thresh):
-    result = []
+    detected_person = []
     for box in boxes:
         label_str = ''
         label = -1
@@ -394,8 +395,10 @@ def draw_boxes(image, boxes, labels, obj_thresh):
             if box.classes[i] > obj_thresh:
                 label_str += labels[i]
                 label = i
-                result.append({'label': labels[i], 'accuracy': box.classes[i] * 100, 'xmin': box.xmin, 'ymin': box.ymin,
-                               'xmax': box.xmax, 'ymax': box.ymax})
+                if labels[i] == 'person':
+                    detected_person.append(
+                        {'label': labels[i], 'accuracy': box.classes[i] * 100, 'xmin': box.xmin, 'ymin': box.ymin,
+                         'xmax': box.xmax, 'ymax': box.ymax})
         if label >= 0:
             cv2.rectangle(image, (box.xmin, box.ymin), (box.xmax, box.ymax), (0, 255, 0), 3)
             cv2.putText(image,
@@ -403,9 +406,6 @@ def draw_boxes(image, boxes, labels, obj_thresh):
                         (box.xmin, box.ymin - 13),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         1e-3 * image.shape[0],
-                        (0, 255, 0), 2)
-    return result
+                        (0, 255, 0), 1)
+    return detected_person
     # return image
-
-
-
