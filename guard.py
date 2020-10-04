@@ -141,9 +141,11 @@ class UploadHandler:
             print(name, detected_data)
             self.last_send_time.value = time.time()
             url = upload_blob(image_path)
-            requests.post(url=config.host, data={'imgUrl': url},
-                          headers={'Content-Type': 'application/x-www-form-urlencoded'})
-
+            try:
+                requests.post(url=config.host, data={'imgUrl': url}, timeout=20,
+                              headers={'Content-Type': 'application/x-www-form-urlencoded'})
+            except requests.exceptions.Timeout:
+                print('메시지 요청 timeout,  file : ' + url)
 
 def watch(base_path, weights_path):
     file_queue = Queue(50)
@@ -154,7 +156,7 @@ def watch(base_path, weights_path):
     upload_handler = UploadHandler()
 
     ps = []
-    for _ in range(7):
+    for _ in range(6):
         ps.append(Process(target=process, args=(base_path, file_queue, weights_path, upload_handler,)))
     for p in ps:
         p.start()
