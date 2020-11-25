@@ -147,6 +147,7 @@ class UploadHandler:
             except requests.exceptions.Timeout:
                 print('메시지 요청 timeout,  file : ' + url)
 
+
 def watch(base_path, weights_path):
     file_queue = Queue(50)
     t = Thread(target=load_file, args=(base_path, file_queue,))
@@ -156,7 +157,7 @@ def watch(base_path, weights_path):
     upload_handler = UploadHandler()
 
     ps = []
-    for _ in range(6):
+    for _ in range(4):
         ps.append(Process(target=process, args=(base_path, file_queue, weights_path, upload_handler,)))
     for p in ps:
         p.start()
