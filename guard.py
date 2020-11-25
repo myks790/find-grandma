@@ -142,7 +142,7 @@ class UploadHandler:
             self.last_send_time.value = time.time()
             url = upload_blob(image_path)
             try:
-                requests.post(url=config.host, data={'imgUrl': url}, timeout=20,
+                requests.post(url=config.message_server_host, data={'imgUrl': url}, timeout=20,
                               headers={'Content-Type': 'application/x-www-form-urlencoded'})
             except requests.exceptions.Timeout:
                 print('메시지 요청 timeout,  file : ' + url)

@@ -25,3 +25,4 @@ Werkzeug==0.16.0
 wrapt==1.11.2
 firebase-admin==4.4.0
 requests==2.25.0
+selenium~=3.141.0
