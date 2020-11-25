@@ -11,7 +11,8 @@ def _save(base_path):
     file = open(base_path+"/snapshots/" + filename, "wb")
     file.write(r.content)
     file.close()
+    threading.Timer(1, _save, args=(base_path,)).start()
 
 
 def snapshot_down(base_path):
-    threading.Timer(1, _save, args=(base_path,)).start()
+    _save(base_path)
