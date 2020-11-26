@@ -13,27 +13,21 @@ class PhoneWatcher:
     def _init_driver(self):
         self.driver = webdriver.Chrome("./chromedriver.exe")
         self.driver.set_window_size(800, 500)
-        self.driver.implicitly_wait(3)
+        self.driver.implicitly_wait(10)
 
     def _login(self):
         self.driver.get(config.router_host+'/login/login.cgi')
-        self.driver.implicitly_wait(2)
         self.driver.find_element_by_name('username').send_keys(config.router_login_info['username'])
         self.driver.find_element_by_name('passwd').send_keys(config.router_login_info['password'])
         self.driver.find_element_by_id("submit_bt").click()
-        self.driver.implicitly_wait(1)
         self.driver.find_element_by_tag_name('area').click()
-        self.driver.implicitly_wait(2)
 
     def _find_connected_device(self):
         self.driver.refresh()
-        self.driver.implicitly_wait(3)
         self.driver.switch_to.frame('main_body')
         self.driver.switch_to.frame('navi_menu_advance')
         self.driver.find_element_by_id('advance_setup_td').click()
-        self.driver.implicitly_wait(1)
         self.driver.find_element_by_id('netconf_setup_td').click()
-        self.driver.implicitly_wait(1)
         self.driver.find_element_by_id('netconf_lansetup_3_td').click()
         self.driver.switch_to.parent_frame()
         self.driver.switch_to.frame('main')
