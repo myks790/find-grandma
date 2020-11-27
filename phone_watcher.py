@@ -7,8 +7,6 @@ import config
 class PhoneWatcher:
     def __init__(self):
         self._init_driver()
-        self._login()
-        self._find_connected_device()
 
     def _init_driver(self):
         self.driver = webdriver.Chrome("./chromedriver.exe")
@@ -17,10 +15,12 @@ class PhoneWatcher:
 
     def _login(self):
         self.driver.get(config.router_host+'/login/login.cgi')
-        self.driver.find_element_by_name('username').send_keys(config.router_login_info['username'])
-        self.driver.find_element_by_name('passwd').send_keys(config.router_login_info['password'])
-        self.driver.find_element_by_id("submit_bt").click()
-        self.driver.find_element_by_tag_name('area').click()
+        try:
+            self.driver.find_element_by_name('username').send_keys(config.router_login_info['username'])
+            self.driver.find_element_by_name('passwd').send_keys(config.router_login_info['password'])
+            self.driver.find_element_by_id("submit_bt").click()
+        finally:
+            self.driver.find_element_by_tag_name('area').click()
 
     def _find_connected_device(self):
         self.driver.refresh()
@@ -42,7 +42,13 @@ class PhoneWatcher:
             except requests.exceptions.Timeout:
                 print('메시지 요청 timeout,  할머니 전화 전원 확인 필요')
 
-        threading.Timer(60*5, self._find_connected_device).start()
+    def start(self):
+        try:
+            if -1 == self.driver.current_url.find("/sess-bin/timepro.cgi"):
+                self._login()
+            self._find_connected_device()
+        finally:
+            threading.Timer(60*3-20, self.start).start()
 
     @staticmethod
     def _has_target_device(devices_info):
@@ -54,4 +60,5 @@ class PhoneWatcher:
 
 
 def watch_phone():
-    PhoneWatcher()
+    watcher = PhoneWatcher()
+    watcher.start()
