@@ -69,7 +69,7 @@ def predict_save(base_path, file_name, yolov3, upload_handler):
                 cv2.imwrite(save_file_path, image.astype('uint8'))
                 os.rename(image_file_path, move_file_path)
             upload_handler.check_upload(e, save_file_path, file_name)
-    if remove_flag:
+    if remove_flag and os.path.isfile(image_file_path):
         os.remove(image_file_path)
     # print('remove : image_path : ', image_path)
 
@@ -83,12 +83,13 @@ def process(base_path, file_queue, weights_path, upload_handler):
     weight_reader.load_weights(yolov3)
 
     while True:
+        file_name = file_queue.get()
         try:
-            predict_save(base_path, file_queue.get(), yolov3, upload_handler)
+            predict_save(base_path, file_name, yolov3, upload_handler)
         except PermissionError:
             print(PermissionError)
             time.sleep(10)
-            predict_save(base_path, file_queue.get(), yolov3, upload_handler)
+            predict_save(base_path, file_name, yolov3, upload_handler)
 
 
 def mse(img_a, img_b):
@@ -126,8 +127,8 @@ def load_file(base_path, file_queue):
                     last_file_name = file_name
         for file_name in target_files:
             file_queue.put(file_name)
-        file_list = os.listdir(path)
         time.sleep(10)
+        file_list = os.listdir(path)
 
 
 class UploadHandler:
