@@ -158,7 +158,7 @@ def watch(base_path, weights_path):
     upload_handler = UploadHandler()
 
     ps = []
-    for _ in range(4):
+    for _ in range(3):
         ps.append(Process(target=process, args=(base_path, file_queue, weights_path, upload_handler,)))
     for p in ps:
         p.start()
