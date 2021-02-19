@@ -2,11 +2,15 @@ from selenium import webdriver
 import threading
 import requests
 import config
+import time
 
 
 class PhoneWatcher:
     def __init__(self):
         self._init_driver()
+        self._last_post_time = None
+        self._request_cnt = 0
+        self.request_term = 60*3-20
 
     def _init_driver(self):
         self.driver = webdriver.Chrome("./chromedriver.exe")
@@ -34,21 +38,27 @@ class PhoneWatcher:
         self.driver.switch_to.frame('lan_pcinfo')
 
         devices_info = self.driver.find_element_by_name('lan_pcinfo_fm').text
-        target_device = self._has_target_device(devices_info)
-        if not target_device:
-            try:
-                requests.post(url=config.message_server_host, data={'text': '할머니 전화 전원 확인 필요'}, timeout=20,
-                              headers={'Content-Type': 'application/x-www-form-urlencoded'})
-            except requests.exceptions.Timeout:
-                print('메시지 요청 timeout,  할머니 전화 전원 확인 필요')
+        return self._has_target_device(devices_info)
 
     def start(self):
         try:
             if -1 == self.driver.current_url.find("/sess-bin/timepro.cgi"):
                 self._login()
-            self._find_connected_device()
+
+            target_device = self._find_connected_device()
+            self._request_cnt += 1
+            if target_device:
+                self._request_cnt = 0
+                self._last_post_time = None
+            elif self._request_cnt == 2 or (self._last_post_time is not None and time.time() - self._last_post_time > 3600):
+                self._last_post_time = time.time()
+                try:
+                    requests.post(url=config.message_server_host, data={'text': '할머니 전화 전원 확인 필요'}, timeout=20,
+                                  headers={'Content-Type': 'application/x-www-form-urlencoded'})
+                except requests.exceptions.Timeout:
+                    print('메시지 요청 timeout,  할머니 전화 전원 확인 필요')
         finally:
-            threading.Timer(60*3-20, self.start).start()
+            threading.Timer(self.request_term, self.start).start()
 
     @staticmethod
     def _has_target_device(devices_info):
