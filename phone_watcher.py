@@ -1,5 +1,6 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.common.exceptions import NoSuchFrameException, NoSuchElementException, ElementNotInteractableException
 import threading
 import requests
 import config
@@ -17,6 +18,7 @@ class PhoneWatcher:
     def _init_driver(self):
         self.driver = webdriver.Chrome("./chromedriver.exe")
         self.driver.set_window_size(800, 500)
+        self.driver.implicitly_wait(3)
 
     def _login(self):
         self.driver.get(config.router_host+'/login/login.cgi')
@@ -39,7 +41,12 @@ class PhoneWatcher:
 
     def _find_connected_device(self):
         if len(self.driver.find_elements(By.NAME, 'lan_pcinfo_fm')) == 0:
-            self.switch_to_lan_pcinfo()
+            try:
+                self.switch_to_lan_pcinfo()
+            except (NoSuchFrameException, NoSuchElementException, ElementNotInteractableException):
+                self.driver.refresh()
+                self.switch_to_lan_pcinfo()
+
         devices_info = self.driver.find_element(By.NAME, 'lan_pcinfo_fm').text
         return self._has_target_device(devices_info)
 
