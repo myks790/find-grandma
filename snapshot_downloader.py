@@ -1,4 +1,5 @@
 import requests
+from requests.exceptions import ConnectTimeout
 import config
 import time
 import random
@@ -12,7 +13,9 @@ def _save(base_path):
         file = open(base_path+"/snapshots/" + filename, "wb")
         file.write(r.content)
         file.close()
-    finally:
+    except ConnectTimeout:
+        print(time.strftime("%m_%d %H-%M-%S")+' : 타임 아웃')
+    else:
         threading.Timer(1, _save, args=(base_path,)).start()
 
 
