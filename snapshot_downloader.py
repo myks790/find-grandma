@@ -1,5 +1,5 @@
 import requests
-from requests.exceptions import ConnectTimeout
+from requests.exceptions import ConnectTimeout, ConnectionError
 import config
 import time
 import random
@@ -13,8 +13,8 @@ def _save(base_path):
         file = open(base_path+"/snapshots/" + filename, "wb")
         file.write(r.content)
         file.close()
-    except ConnectTimeout:
-        print(time.strftime("%m_%d %H-%M-%S")+' : 스냅샷 다운로드 타임 아웃')
+    except (ConnectTimeout, ConnectionError):
+        print(time.strftime("%m_%d %H-%M-%S")+' : 스냅샷 다운로드 실패')
         threading.Timer(5, _save, args=(base_path,)).start()
     else:
         threading.Timer(1, _save, args=(base_path,)).start()
