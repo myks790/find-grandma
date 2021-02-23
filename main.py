@@ -28,9 +28,9 @@ def _main_(args):
     base_path = args.path
     weights_path = args.weights
 
-    snapshot_down(base_path)
     watch_phone()
     watch(base_path, weights_path)
+    snapshot_down(base_path)
 
     print('end=============')
 

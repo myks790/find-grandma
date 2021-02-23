@@ -14,7 +14,8 @@ def _save(base_path):
         file.write(r.content)
         file.close()
     except ConnectTimeout:
-        print(time.strftime("%m_%d %H-%M-%S")+' : 타임 아웃')
+        print(time.strftime("%m_%d %H-%M-%S")+' : 스냅샷 다운로드 타임 아웃')
+        threading.Timer(5, _save, args=(base_path,)).start()
     else:
         threading.Timer(1, _save, args=(base_path,)).start()
 
