@@ -116,7 +116,7 @@ def load_file(base_path, file_queue):
                 else:
                     crop_last_img = cv2.imread(path + last_file_name)
                 crop_img = cv2.imread(path + file_name)
-                if crop_last_img is not None and crop_img is not None and mse(crop_last_img, crop_img) < 100:
+                if crop_last_img is not None and crop_img is not None and mse(crop_last_img, crop_img) < 105:
                     try:
                         os.remove(path + file_name)
                     except PermissionError:
