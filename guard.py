@@ -32,6 +32,8 @@ def predict_save(base_path, file_name, yolov3, upload_handler):
     obj_thresh, nms_thresh = 0.505, 0.45
     # preprocess the image
 
+    if not os.path.isfile(image_file_path):
+        return
     image = cv2.imread(image_file_path)
     if image is None:
         return
@@ -111,10 +113,13 @@ def load_file(base_path, file_queue):
             if file_list[len(file_list) - 1] == file_name:
                 break
             if file_name > last_file_name:
+                crop_last_img = None
                 if os.path.isfile(pre_path + last_file_name):
                     crop_last_img = cv2.imread(pre_path + last_file_name)
-                else:
+                elif os.path.isfile(path + last_file_name):
                     crop_last_img = cv2.imread(path + last_file_name)
+                if not os.path.isfile(path + file_name):
+                    break
                 crop_img = cv2.imread(path + file_name)
                 if crop_last_img is not None and crop_img is not None and mse(crop_last_img, crop_img) < 105:
                     try:
@@ -122,6 +127,8 @@ def load_file(base_path, file_queue):
                     except PermissionError:
                         time.sleep(10)
                         os.remove(path + file_name)
+                    except FileNotFoundError:
+                        pass
                 else:
                     target_files.append(file_name)
                     last_file_name = file_name
@@ -137,16 +144,20 @@ class UploadHandler:
         self.last_send_time = Value('d', 1)
 
     def check_upload(self, detected_data, image_path, name):
-        if time.time() - self.last_send_time.value > 5 * 60 and detected_data['xmin'] < 255 \
-                and detected_data['ymax'] > 300:
-            print(name, detected_data)
+        print(name, detected_data)
+        if time.time() - self.last_send_time.value > 10 * 60 and detected_data['xmin'] < 245 \
+                and detected_data['ymax'] > 310:
             self.last_send_time.value = time.time()
             url = upload_blob(image_path)
             try:
-                requests.post(url=config.message_server_host, data={'imgUrl': url}, timeout=20,
+                res = requests.post(url=config.message_server_host, data={'imgUrl': url}, timeout=20,
                               headers={'Content-Type': 'application/x-www-form-urlencoded'})
+                print(res)
             except requests.exceptions.Timeout:
                 print('메시지 요청 timeout,  file : ' + url)
+            except requests.exceptions.ConnectionError:
+                print('메시지 요청 ConnectionError,  file : ' + url)
+
 
 
 def watch(base_path, weights_path):

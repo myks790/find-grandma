@@ -1,7 +1,7 @@
 import argparse
 from guard import watch
 from snapshot_downloader import snapshot_down
-from phone_watcher import watch_phone
+# from phone_watcher import watch_phone
 
 argparser = argparse.ArgumentParser(
     description='test yolov3 network with coco weights')
@@ -21,18 +21,19 @@ argparser.add_argument(
     '-p',
     '--path',
     help='path to base path',
-    default='Z:/ch-gm')
+    default='D:/temp/ch-gm')
 
 
 def _main_(args):
     base_path = args.path
     weights_path = args.weights
 
-    watch_phone()
+    # watch_phone()
     snapshot_down(base_path)
-    watch(base_path, weights_path)
-
-    print('end=============')
+    while True:
+        print('start=============')
+        watch(base_path, weights_path)
+        print('end=============')
 
 
 if __name__ == '__main__':
